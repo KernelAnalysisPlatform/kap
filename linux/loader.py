@@ -37,7 +37,8 @@ def load_binary(static):
 
   ncount = 0
   for segment in elf.iter_segments():
-    addr = segment['p_vaddr']
+    offset = segment['p_offset']
+    addr = static.load_address + offset
     if segment['p_type'] == 'PT_LOAD':
       memsize = segment['p_memsz']
       static.add_memory_chunk(addr, segment.data().ljust(memsize, "\x00"))
