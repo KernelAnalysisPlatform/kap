@@ -28,37 +28,25 @@ def load_binary(static):
   except ELFError:
     print "*** loader error: non-ELF detected"
     return
-
   # TODO: replace with elf['e_machine']
   progdat = open(static.path).read(0x20)
   fb = struct.unpack("H", progdat[0x12:0x14])[0]   # e_machine
   static['arch'] = get_arch(fb)
   static['entry'] = elf['e_entry']
+  static.raw_binary = elf.get_section_by_name('.text').data()
 
   ncount = 0
-  for segment in elf.iter_segments():
-    offset = segment['p_offset']
-    addr = static.load_address + offset
-    if segment['p_type'] == 'PT_LOAD':
-      memsize = segment['p_memsz']
-      static.add_memory_chunk(addr, segment.data().ljust(memsize, "\x00"))
-
   for section in elf.iter_sections():
     if static.debug >= 1:
       print "** found section", section.name, type(section)
 
-    if isinstance(section, RelocationSection):
-      symtable = elf.get_section(section['sh_link'])
-      if symtable.is_null():
-        continue
+    # relocatable module has no segment.
+    if section.name == '.text':
+      addr = static.load_address
+      memsize = section['sh_size']
+      static.add_memory_chunk(addr, section.data().ljust(memsize, "\x00"))
+      #static.add_memory_chunk(addr, static.raw_binary.ljust(memsize, "\x00"))
 
-      for rel in section.iter_relocations():
-        symbol = symtable.get_symbol(rel['r_info_sym'])
-        # if static.debug >= 1: #suppress output for testing
-        #   print "Relocation",rel, symbol.name
-        if rel['r_offset'] != 0 and symbol.name != "":
-          static[rel['r_offset']]['name'] = "__"+symbol.name
-          ncount += 1
 
       # hacks for PLT
       # TODO: this is fucking terrible
@@ -80,20 +68,14 @@ def load_binary(static):
                            PLT_ENTRY_SIZE)):
               static[addr]['name'] = name
             #print plt_symbols, section['sh_addr']
-
-
-    if isinstance(section, SymbolTableSection):
+    elif isinstance(section, SymbolTableSection):
       for nsym, symbol in enumerate(section.iter_symbols()):
-        #print symbol['st_info'], symbol.name, hex(symbol['st_value'])
         if symbol['st_value'] != 0 and symbol.name != "" and symbol['st_info']['type'] == "STT_FUNC":
-          sym_addr = static.load_address + symbol['st_value']
-          if static.debug >= 1:
-            print "Symbol",hex(sym_addr), symbol.name
-          static[sym_addr]['name'] = symbol.name
-          ncount += 1
+          # .text section
+          if symbol['st_shndx'] == 2:
+            static[static.load_address + symbol['st_value']]['name'] = symbol.name
+            print symbol.name, hex(static.load_address + symbol['st_value'])
 
-    # parse the DynamicSection to get the libraries
-    #if isinstance(section, DynamicSection):
   if static.debug >= 1:
     print "** found %d names" % ncount
 
